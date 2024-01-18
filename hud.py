@@ -1,16 +1,16 @@
 control_messages = """
 @fontsize <n>
-@sohwlast
+@showlast
 @quit
 @hide
 @hudcolor
 @hudcolorf
 @hudtime
+@help
 """
 
-
-
 import sys
+import re
 from PySide6.QtCore import *
 from PySide6.QtGui import *
 from PySide6.QtWidgets import *
@@ -45,6 +45,8 @@ class Hud(QWidget):
 
     print(f"Creating HUD on port {port}")
     self.hudtime = hudtime
+    self.showSmall = False
+    self.showSmallSize = 50
 
     self.udpSocket = QUdpSocket()
     self.udpSocket.readyRead.connect(self.handleUdp)
@@ -65,6 +67,7 @@ class Hud(QWidget):
     self.fontname = "Optima"
     self.fontsize = 100
     self.font = QFont(self.fontname,self.fontsize)
+    self.smallFont = QFont(self.fontname,self.showSmallSize)
     self.color = QColor(100,255,100)
     self.ocolor = Qt.black
     self.pen = QPen(self.ocolor,16)
@@ -83,22 +86,48 @@ class Hud(QWidget):
 
   def paintEvent(self,event):
     with QPainter(self) as p:
+      rect = self.rect()
+      width = rect.width()
       text = self.content
       lines = text.splitlines()
-      metrics = QFontMetrics(self.font)
+      font = self.smallFont if self.showSmall else self.font
+      metrics = QFontMetrics(font)
       h = metrics.height()
       #print(h)
       for i,line in enumerate(lines):
-        path = QPainterPath()
-        path.addText(0,0,self.font,str(line))
-        p.translate(0,h)
+        dlines = []
+        dline = ""
+        lastspace = 0
+        j = 0
+        for char in line:
+          dline1 = dline + char
+          if re.match(r"\s",char):
+            lastspace = j
+          drect = metrics.boundingRect(dline1)
+          dlinew = drect.width()
+          if dlinew >= width:
+            if lastspace == 0:
+              lastspace = j-1
+            dlines.append(dline1[:lastspace+1].rstrip())
+            dline = dline1[lastspace+1:].lstrip()
+            j = 0
+            lastspace = 0
+          else:
+            dline = dline1
+          j += 1
+        dlines.append(dline)
 
-        # draw twice so that the black outline is _behind_ the fill
-        p.setPen(self.pen)
-        p.drawPath(path)
-        p.setBrush(self.color)
-        p.setPen(Qt.NoPen)
-        p.drawPath(path)
+        for dline in dlines:
+          path = QPainterPath()
+          path.addText(0,0,font,str(dline))
+          p.translate(0,h)
+
+          # draw twice so that the black outline is _behind_ the fill
+          p.setPen(self.pen)
+          p.drawPath(path)
+          p.setBrush(self.color)
+          p.setPen(Qt.NoPen)
+          p.drawPath(path)
 
   def sethue(self,h):
     self.color = QColor.fromHsl(h%360,255,180)
@@ -110,40 +139,41 @@ class Hud(QWidget):
     x = x[:256]
     now = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
     print(f"[{now}] HUD Show: {x}")
+    self.showSmall = False
     if x.strip() == "@quit":
       return QCoreApplication.quit()
-    if x.strip() == "@hide":
+    elif x.strip() == "@help":
+      self.content = control_messages
+      self.showSmall = True
+    elif x.strip() == "@hide":
       return self.hide()
-    if x.strip().startswith("@hudcolorh "):
+    elif x.strip().startswith("@hudcolorh "):
       try:
         h = x.split(" ")[1]
         self.color = QColor(h)
       except ValueError:
         self.content = "Error, invalid: "+x
-        pass
-    if x.strip().startswith("@hudhue "):
+    elif x.strip().startswith("@hudhue "):
       try:
         h = x.split(" ")[1]
         h = int(h)
         self.sethue(h)
       except ValueError:
         self.content = "Error, invalid: "+x
-        pass
-    if x.strip().startswith("@hudcolorf "):
+    elif x.strip().startswith("@hudcolorf "):
       try:
         r,g,b = [clamp(int(255.9*float(y)),0,255) for y in x.split(" ")]
         self.color = QColor(r,g,b)
       except ValueError:
         self.content = "Error, invalid: "+x
-        pass
-    if x.strip().startswith("hudcolor "):
+    elif x.strip().startswith("@hudcolor "):
       try:
         r,g,b = [clamp(int(y),0,255) for y in x.split(" ")]
         self.color = QColor(r,g,b)
       except ValueError:
         self.content = "Error, invalid: "+x
         pass
-    if x.strip().startswith("@hudtime "):
+    elif x.strip().startswith("@hudtime "):
       try:
         r,s = x.split(" ")
         hudtime = int(s)
@@ -151,7 +181,7 @@ class Hud(QWidget):
       except ValueError:
         self.content = "Error, invalid: "+x
         pass
-    if x.strip().startswith("@fontsize "):
+    elif x.strip().startswith("@fontsize "):
       try:
         r,s = x.split(" ")
         fs = int(s)
@@ -160,7 +190,7 @@ class Hud(QWidget):
       except ValueError:
         self.content = "Error, invalid: "+x
         pass
-    if not x.strip().startswith("@showlast"):
+    elif not x.strip().startswith("@showlast"):
       self.content = x
     if not self.showing:
       super().show()
